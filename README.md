@@ -21,20 +21,20 @@ include/gpuqueue/         # Public C++ headers
 flowchart LR
   subgraph A[Track A — Redis-backed MVP]
     P[Producers] --> R[(Redis List/Stream)]
-    R --> H[Host Worker\n(Python/C++)]
-    H --> S[Host Staging\nPinned Buffer]
+    R --> H[Host Worker<br/>(Python/C++)]
+    H --> S[Host Staging<br/>Pinned Buffer]
     S -->|cudaMemcpyAsync| GQ[GPU Queue API]
     GQ --> K[(Persistent Kernel)]
-    K --> PR[Process Message\n(Device Function)]
+    K --> PR[Process Message<br/>(Device Function)]
     PR --> HR[Host Results/ACK]
     HR --> RA[Redis ACK]
   end
 
   subgraph B[Track B — GPU-resident Stage-2]
     P2[Producers] --> API[Host API: enqueue_async]
-    API --> RB[(GPU Ring Buffer\nDevice Global Memory)]
+    API --> RB[(GPU Ring Buffer<br/>Device Global Memory)]
     RB --> K2[(Persistent Kernel)]
-    K2 --> PROC2[Process Message\n(Device Function)]
+    K2 --> PROC2[Process Message<br/>(Device Function)]
     PROC2 --> RES[(Results / DONE)]
     RES --> DQ[Host API: try_dequeue_result]
   end
