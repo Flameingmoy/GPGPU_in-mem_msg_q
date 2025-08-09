@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+*.coverage
+.coverage*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build artifacts
+build/
+dist/
+wheelhouse/
+*.whl
+
+# CMake/Ninja
+CMakeCache.txt
+CMakeFiles/
+cmake-build*/
+_make/
+Makefile
+ninja.build
+_rules.ninja
+*.ninja
+install_manifest.txt
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Virtualenvs
+.venv/
+venv/

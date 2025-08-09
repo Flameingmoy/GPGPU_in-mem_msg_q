@@ -1,0 +1,47 @@
+[build-system]
+requires = [
+  "scikit-build-core>=0.9.0",
+  "pybind11>=2.11",
+  "cmake>=3.24",
+  "ninja>=1.11",
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "gpuqueue"
+version = "0.1.0a0"
+description = "CUDA-backed GPU-resident message queue with Python bindings"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Chinmay" }]
+license = { text = "Apache-2.0" }
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: C++",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Operating System :: POSIX :: Linux",
+  "License :: OSI Approved :: Apache Software License",
+]
+
+[project.optional-dependencies]
+track-a = [
+  "redis[hiredis]>=5,<6",
+  "msgpack>=1.0,<2",
+]
+
+dev = [
+  "pytest",
+  "pytest-benchmark",
+  "mypy",
+  "ruff",
+]
+
+[tool.scikit-build]
+wheel.packages = ["src/python/gpuqueue"]
+cmake.verbose = true
+ninja.minimum-version = "1.11"
+
+[tool.scikit-build.cmake]
+minimum-version = "3.24"
