@@ -74,14 +74,98 @@ MVP simplifications:
 - Single host-producer, single persistent device-consumer kernel (can scale later).
 
 ## 4) Concurrency & Memory Model
-- CUDA atomics: Use device atomics for slot claim/release; use host atomics (C11 stdatomic) for host-side counters.
-- Fences (key correctness rule):
-  - Producer publish: Write payload → __threadfence() → set slot_state=READY (device-side) or order H2D copy before publishing readiness to device via stream-dependence. When host publishes readiness through mapped memory, the GPU consumer must use acquire semantics after seeing READY.
-  - Completion: Write results → __threadfence() → set slot_state=DONE → increment tail.
-  - Host/device visibility: When crossing the PCIe boundary or host-pinned mappings, use __threadfence_system() on the device side before signaling host-visible flags; on the host side, ensure stream completion (cudaStreamSynchronize or events) before reading device-written host memory [CUDA C++ Programming Guide: Memory Fence Functions].
-- Streams/events:
-  - Use per-batch streams to pipeline H2D copies and kernels.
-  - Persistent kernel polling loop should use backoff (e.g., __nanosleep) to reduce SM burn when idle.
+
+### 4.1 Atomics Strategy
+- **libcu++ atomics (CUDA 11+)**: Prefer `cuda::atomic<T>` and `cuda::atomic_ref<T>` from `<cuda/atomic>` for clean memory ordering semantics. These provide explicit `memory_order` parameters (acquire, release, seq_cst).
+- **Legacy atomics**: `atomicCAS`, `atomicExch`, `atomicAdd` for device-side operations where libcu++ is not suitable.
+- **Host atomics**: C++11 `std::atomic<T>` for host-side counters in control block.
+
+### 4.2 Fence Patterns (Critical Correctness Rules)
+
+| Operation | Pattern | Fence |
+|-----------|---------|-------|
+| **Producer publish** | Write payload → fence → set READY | `__threadfence()` or stream ordering |
+| **Consumer claim** | Read READY → `atomicCAS(READY→INFLIGHT)` | Implicit acquire on atomic |
+| **Consumer complete** | Write result → fence → set DONE → advance tail | `__threadfence()` |
+| **Host visibility** | Device writes host-visible data → fence | `__threadfence_system()` |
+
+Producer-Consumer Example (validated with NVIDIA docs):
+```cuda
+// Producer (device-side after H2D copy)
+payload[slot] = data;
+__threadfence();  // Ensure payload visible before READY
+atomicExch(&slot_state[slot], READY);
+
+// Consumer (persistent kernel)
+if (atomicCAS(&slot_state[slot], READY, INFLIGHT) == READY) {
+    __threadfence();  // Acquire semantics
+    process_payload(payload[slot]);
+    result[slot] = output;
+    __threadfence();  // Ensure result visible before DONE
+    atomicExch(&slot_state[slot], DONE);
+    atomicAdd(&tail, 1);
+}
+
+// Before host-visible signal
+__threadfence_system();  // Cross PCIe boundary
+atomicExch(&completion_flag, 1);  // Host can read this
+```
+
+### 4.3 Avoiding ABA Problem
+The slot state machine (EMPTY→READY→INFLIGHT→DONE→EMPTY) avoids ABA because:
+- Each state has a unique meaning and can only transition to the next state
+- No slot can be reused until it completes the full cycle
+- 64-bit head/tail indices avoid wrap ambiguity (2^64 messages before wrap)
+
+### 4.4 Persistent Kernel Design
+```cuda
+__global__ void persistent_consumer(ControlBlock* ctrl, SlotHeader* headers, 
+                                     uint8_t* payloads, uint32_t* states) {
+    while (!ctrl->stop_flag) {
+        bool found_work = false;
+        
+        // Scan for READY slots (cooperative across threads)
+        for (uint32_t slot = threadIdx.x; slot < capacity; slot += blockDim.x) {
+            if (atomicCAS(&states[slot], READY, INFLIGHT) == READY) {
+                found_work = true;
+                __threadfence();  // Acquire
+                
+                process_message(&payloads[slot * slot_bytes], headers[slot].len);
+                
+                __threadfence();  // Release
+                atomicExch(&states[slot], DONE);
+            }
+        }
+        
+        // Backoff when idle to reduce SM starvation
+        if (!found_work) {
+            __nanosleep(1000);  // 1 microsecond (requires sm_70+)
+        }
+    }
+}
+```
+
+### 4.5 Cooperative Groups (Optional for Multi-Block)
+For multi-block persistent kernels, use cooperative groups for grid-wide synchronization:
+```cuda
+#include <cooperative_groups.h>
+namespace cg = cooperative_groups;
+
+__global__ void multi_block_consumer(...) {
+    cg::grid_group grid = cg::this_grid();
+    // ... grid.sync() for grid-wide barrier if needed
+}
+```
+Launch with `cudaLaunchCooperativeKernel()`.
+
+### 4.6 Streams and Pipelining
+- Use per-batch CUDA streams to overlap H2D, kernel, D2H
+- Pattern for 2 streams:
+  ```
+  Stream 0: H2D(batch0) → Kernel(batch0) → D2H(batch0)
+  Stream 1:              H2D(batch1) → Kernel(batch1) → D2H(batch1)
+  ```
+- Use `cudaStreamSynchronize` or events to track completion
 
 ## 5) External API (initial)
 - Host API (Track B):

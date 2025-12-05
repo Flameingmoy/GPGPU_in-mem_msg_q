@@ -40,8 +40,8 @@ dev = [
 
 [tool.scikit-build]
 wheel.packages = ["src/python/gpuqueue"]
-cmake.verbose = true
 ninja.minimum-version = "1.11"
 
 [tool.scikit-build.cmake]
 minimum-version = "3.24"
+verbose = true

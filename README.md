@@ -1,61 +1,165 @@
-# GPUQueue (CUDA Message Queue) — Scaffold
+# GPUQueue — CUDA GPU-Resident Message Queue
 
-This repository contains a scaffold for a CUDA-backed, GPU-resident message queue with a Python API.
+A high-performance, GPU-resident message queue with Python bindings. Messages are enqueued from the host, processed by a persistent CUDA kernel, and results returned — all with minimal PCIe round-trips.
 
-- Build system: scikit-build-core + CMake + PyBind11 + CUDA
-- Python package: `gpuqueue`
-- Target: Linux x86_64, Python 3.10–3.12, CUDA 12.6+, RTX 4070 Ti Super (sm_89)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![CUDA](https://img.shields.io/badge/CUDA-12.6%2B-green.svg)](https://developer.nvidia.com/cuda-toolkit)
+[![Python](https://img.shields.io/badge/Python-3.10--3.12-blue.svg)](https://www.python.org/)
 
-## Layout
+## Features
+
+- **GPU-Resident Queue**: Ring buffer lives in VRAM, processed by persistent kernel
+- **Low Latency**: Avoid repeated kernel launch overhead with persistent kernel pattern
+- **Correct Synchronization**: CUDA atomics + memory fences (`__threadfence`, `__threadfence_system`)
+- **Python API**: Simple `enqueue()` / `dequeue()` interface via pybind11
+- **High Throughput**: Batch enqueue, async transfers, multi-stream pipelining
+
+## Requirements
+
+| Component | Version |
+|-----------|---------|
+| **OS** | Linux x86_64 (Ubuntu 22.04/24.04 tested) |
+| **GPU** | NVIDIA GPU with Compute Capability ≥7.0 (tested on RTX 4070 Ti Super, sm_89) |
+| **CUDA Toolkit** | 12.6+ |
+| **Driver** | ≥535 |
+| **Python** | 3.10–3.12 |
+| **CMake** | ≥3.24 |
+
+## Project Status
+
+| Milestone | Status | Description |
+|-----------|--------|-------------|
+| M0 | ✅ Complete | Documentation foundations |
+| M1 | ✅ Complete | Environment & build verification |
+| M2 | 🚧 In Progress | Ring buffer & persistent kernel |
+| M3 | ⬜ Pending | Redis-backed MVP (Track A) |
+| M4 | ⬜ Pending | Python API & packaging |
+| M5 | ⬜ Pending | Testing & benchmarking |
+| M6 | ⬜ Pending | CI/CD & release |
+
+## Quick Start
+
+### 1. Setup Environment
+
+```bash
+# Create conda environment
+conda env create -f environment.yml
+conda activate gpuqueue
+
+# Ensure CUDA is in PATH
+export PATH=/usr/local/cuda-12.6/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda-12.6/lib64:$LD_LIBRARY_PATH
+
+# Verify environment
+./scripts/check_env.sh
 ```
-src/
-  python/gpuqueue/        # Python package
-  cpp/                    # C++ sources and PyBind11 bindings
-  cuda/                   # CUDA kernels
-include/gpuqueue/         # Public C++ headers
+
+### 2. Build & Test
+
+```bash
+# Build with CMake
+mkdir -p build && cd build
+cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release
+cmake --build .
+
+# Run tests
+ctest --output-on-failure
+
+# Install Python package (editable)
+cd ..
+pip install -e .
+```
+
+### 3. Verify Installation
+
+```python
+import gpuqueue as gq
+
+gq.init(device=0)
+print(f"GPUQueue version: {gq.core_version()}")
+gq.shutdown()
 ```
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  subgraph A[Track A - Redis-backed MVP]
-    P["Producers"] --> R["Redis List/Stream"]
-    R --> H["Host Worker (Python/C++)"]
-    H --> S["Host Staging Pinned Buffer"]
-    S --> GQ["GPU Queue API"]
-    GQ --> K["Persistent Kernel"]
-    K --> PR["Process Message (Device Function)"]
-    PR --> HR["Host Results/ACK"]
-    HR --> RA["Redis ACK"]
+  subgraph Host["Host (CPU)"]
+    P["Producer"] --> API["q_enqueue()"]
+    API --> PIN["Pinned Buffer"]
   end
 
-  subgraph B[Track B - GPU-resident Stage-2]
-    P2["Producers"] --> API["Host API: enqueue_async"]
-    API --> RB["GPU Ring Buffer Device Global Memory"]
-    RB --> K2["Persistent Kernel"]
-    K2 --> PROC2["Process Message (Device Function)"]
-    PROC2 --> RES["Results / DONE"]
-    RES --> DQ["Host API: try_dequeue_result"]
+  subgraph Device["Device (GPU)"]
+    PIN -->|"async H2D"| RB["Ring Buffer (VRAM)"]
+    RB --> PK["Persistent Kernel"]
+    PK --> PROC["process_message()"]
+    PROC --> RES["Results"]
   end
 
-  %% Notes: correctness via CUDA atomics + memory fences
-  %% (__threadfence, __threadfence_system) ensure publish/visibility across host/device
+  RES -->|"async D2H"| DQ["q_try_dequeue_result()"]
+  DQ --> C["Consumer"]
 ```
 
-See `docs/design.md` and `docs/api.md` for detailed semantics and synchronization.
+**Key Design Points:**
+- **Fixed-size slots** (1-4KB) avoid fragmentation
+- **Slot state machine**: `EMPTY → READY → INFLIGHT → DONE → EMPTY`
+- **libcu++ atomics** for clean memory ordering
+- **`__nanosleep()`** for polling backoff (reduces SM starvation)
 
-## Quickstart (build locally)
+## Project Layout
 
-Prereqs: Python 3.10+, CUDA Toolkit (nvcc), CMake ≥3.24, Ninja ≥1.11
-
-```bash
-python -m pip install -U pip
-python -m pip install -e .
-python -c "import gpuqueue as gq; print(gq.__version__); print(gq.core_version() if gq.core_version else 'no core')"
+```
+├── include/gpuqueue/       # Public C++ headers
+│   ├── queue.hpp           # Core API declarations
+│   ├── memory.hpp          # CUDA memory utilities (RAII wrappers)
+│   └── ring_buffer.hpp     # Ring buffer config
+├── src/
+│   ├── cpp/                # C++ host code & pybind11 bindings
+│   ├── cuda/               # CUDA kernels
+│   └── python/gpuqueue/    # Python package
+├── tests/
+│   ├── cpp/                # C++ unit tests (gtest)
+│   └── cuda/               # CUDA tests
+├── scripts/
+│   └── check_env.sh        # Environment verification
+└── docs/                   # Design docs, API reference, runbooks
 ```
 
-Notes:
-- The core currently exposes `init()`, `shutdown()`, and `version()` from the `_core` extension.
-- See `docs/packaging.md` for packaging and CI details.
+## Documentation
+
+- [`docs/design.md`](docs/design.md) — Architecture & concurrency model
+- [`docs/api.md`](docs/api.md) — Host & kernel API reference
+- [`docs/tasks.md`](docs/tasks.md) — Project backlog & milestones
+- [`docs/testing.md`](docs/testing.md) — Test strategy & invariants
+- [`docs/runbook.md`](docs/runbook.md) — Operations & troubleshooting
+
+## Benchmarks (Preliminary)
+
+Tested on RTX 4070 Ti Super (sm_89, 16GB VRAM):
+
+| Metric | Value |
+|--------|-------|
+| PCIe Bandwidth (H2D) | ~24 GB/s |
+| PCIe Bandwidth (D2H) | ~24 GB/s |
+| Compute Capability | 8.9 |
+| SM Count | 66 |
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Run tests (`ctest` and `pytest`)
+4. Commit changes (`git commit -m 'Add amazing feature'`)
+5. Push to branch (`git push origin feature/amazing-feature`)
+6. Open a Pull Request
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE) for details.
+
+## Acknowledgments
+
+- NVIDIA CUDA Programming Guide
+- [pybind11](https://github.com/pybind/pybind11)
+- [scikit-build-core](https://github.com/scikit-build/scikit-build-core)
 

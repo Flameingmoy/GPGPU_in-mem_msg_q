@@ -1,0 +1,16 @@
+name: gpuqueue
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - cmake>=3.24
+  - ninja>=1.11
+  - pybind11>=2.11
+  - pytest
+  - pytest-benchmark
+  - pip
+  - pip:
+    - scikit-build-core>=0.9.0
+    - ruff
+    - mypy

@@ -4,6 +4,7 @@ This backlog tracks both Track A (Redis-backed MVP) and Track B (GPU VRAM-reside
 
 Legend: [ ] todo, [x] done, [~] in-progress, [!] blocked
 
+---
 
 ## Milestone M0 — Documentation Foundations
 - [x] `docs/design.md` (architecture, queues, API surface)
@@ -15,82 +16,189 @@ Legend: [ ] todo, [x] done, [~] in-progress, [!] blocked
 - [x] `docs/use_cases.md` (scenarios, acceptance)
 - [x] `docs/packaging.md` (Python packaging plan, Track A risks)
 
-Exit criteria: docs reviewed and linked from repo README (TBD).
+Exit criteria: docs reviewed and linked from repo README.
 
+---
 
-## Milestone M1 — Environment Setup
-- [ ] Verify NVIDIA driver + CUDA Toolkit 12.6+ availability
-- [ ] Script: device property query (compute capability 8.9)
-- [ ] Build skeleton (CMake scaffolding for C++/CUDA, PyBind11)
-- [ ] "Hello, CUDA" kernel + unit test
-- [ ] Host↔Device mem management wrappers + h2d/d2h transfer test
+## Milestone M1 — Environment & Build Verification
+**Goal**: Prove the toolchain works end-to-end with actual GPU execution.
 
-Exit criteria: local build runs unit tests, GPU detected and usable.
+### M1.1 — Environment Verification
+- [x] Verify NVIDIA driver ≥535 + CUDA Toolkit 12.6+ installed
+- [x] Create `scripts/check_env.sh`: validate `nvcc --version`, `nvidia-smi`, driver/toolkit compat
+- [x] Query device properties via CUDA API (confirm sm_89 / CC 8.9)
 
+### M1.2 — Build System Hardening
+- [x] CMakeLists.txt with CUDA + pybind11 (scaffold exists)
+- [x] Add `CMAKE_CUDA_STANDARD 17` for libcu++ atomics
+- [x] Add debug/release build variants with proper flags (`-G -lineinfo` for debug)
+- [x] Fix `CUDA_SEPARABLE_COMPILATION` (only enable if needed for device linking)
+- [x] Validate build: `cmake --build . --target all`
 
-## Milestone M2 — Track A (Redis-backed MVP)
-- [ ] Local Redis (container or package) with config and healthcheck
-- [ ] Host producer: enqueue to Redis List/Stream; backpressure policy
-- [ ] Host consumer/worker: dequeue → stage in pinned buffer → async H2D copy
-- [ ] GPU kernel(s): simple processing path using CUDA streams
-- [ ] At-least-once delivery; idempotent processing demo
-- [ ] Observability: queue depth, throughput, latency histograms
-- [ ] Integration tests covering ordering and retry paths
+### M1.3 — Hello CUDA Kernel
+- [x] Implement `tests/cuda/test_device_query.cu`: print GPU name, SM count, compute cap
+- [x] Implement simple vector add kernel to verify H2D/D2H transfers
+- [x] Add Google Test (gtest) framework for C++ tests
+- [ ] Verify with `compute-sanitizer --tool memcheck ./test_device_query`
 
-Exit criteria: sustained N msgs/s with documented latency on dev box; resiliency under restarts.
+### M1.4 — Memory Management Utilities
+- [x] Implement `include/gpuqueue/memory.hpp`: pinned alloc, device alloc, async copy wrappers
+- [x] Test H2D/D2H roundtrip with timing (baseline for PCIe bandwidth: ~24 GB/s)
+- [x] Implement CUDA stream pool utility for multi-stream pipelining
 
+Exit criteria: `ctest` passes all M1 tests; GPU detected and kernel executed successfully. ✅ COMPLETE
 
-## Milestone M3 — Track B (GPU-Resident Queue, Stage-2)
-- [ ] Device ring buffer in global memory; fixed-size slots and metadata
-- [ ] Persistent kernel that scans READY → processes → marks DONE
-- [ ] Host API: `init()`, `enqueue_async()`, `try_dequeue_result()`, `stats()`, `shutdown()`
-- [ ] Correct atomic + fence protocol (`__threadfence`/`__threadfence_system`)
-- [ ] Multi-producer (host) support; single consumer kernel (initial)
-- [ ] Backpressure + timeouts; metrics on stalls and occupancy
-- [ ] Fault injection + sanitizer runs (Compute Sanitizer)
+---
 
-Exit criteria: correctness under stress; basic performance targets achieved.
+## Milestone M2 — Track B Core: Ring Buffer & Persistent Kernel
+**Goal**: Implement the GPU-resident queue core (prioritize Track B for innovation value).
 
+### M2.1 — Ring Buffer Data Structures
+- [ ] Define `SlotHeader` struct: `{ uint32_t len; uint32_t flags; uint64_t msg_id; }` (16B aligned)
+- [ ] Define `SlotState` enum: `EMPTY=0, READY=1, INFLIGHT=2, DONE=3`
+- [ ] Implement host-side `RingBuffer` class:
+  - Allocate device arrays: `d_headers[capacity]`, `d_payloads[capacity][slot_bytes]`, `d_states[capacity]`
+  - Allocate control block in pinned memory (head, tail, stop_flag, stats)
+- [ ] Unit test: allocation/deallocation, index wrap math `(i & (capacity-1))`
+
+### M2.2 — Host Enqueue Path
+- [ ] Implement `q_enqueue()`: reserve slot → async H2D copy → publish READY
+- [ ] Implement `q_enqueue_batch()`: batch multiple messages for throughput
+- [ ] Use `cuda::atomic` (libcu++) for control block counters
+- [ ] Correct fence pattern: H2D copy completes (stream sync) → set slot_state=READY
+- [ ] Handle Q_ERR_FULL with backpressure (spin with backoff or return immediately)
+
+### M2.3 — Persistent Kernel Consumer
+- [ ] Implement persistent kernel loop:
+  ```cuda
+  while (!stop_flag) {
+      // Scan for READY slots
+      // atomicCAS to claim INFLIGHT
+      // Call process_message()
+      // __threadfence() → set DONE → advance tail
+      // Backoff with __nanosleep() when idle
+  }
+  ```
+- [ ] Use cooperative groups for grid-wide coordination (optional for multi-block)
+- [ ] Implement simple `process_message()`: copy/transform payload, write result
+
+### M2.4 — Result Dequeue & Completion
+- [ ] Implement `q_try_dequeue_result()`: check slot DONE, copy result D2H
+- [ ] Implement completion queue pattern (host-visible ring of completed msg_ids)
+- [ ] `__threadfence_system()` before signaling host-visible completion
+
+### M2.5 — Shutdown & Error Handling
+- [ ] Graceful shutdown: set stop_flag, wait for INFLIGHT→DONE, drain
+- [ ] Implement `q_stats()`: counters, queue depth, error flags
+- [ ] CUDA error propagation to host API
+
+Exit criteria: correctness tests pass; `compute-sanitizer --tool racecheck` clean.
+
+---
+
+## Milestone M3 — Track A: Redis-Backed MVP (Parallel Track)
+**Goal**: Validate batching and GPU processing with Redis as broker.
+
+### M3.1 — Redis Setup
+- [ ] Docker Compose for Redis 7.x
+- [ ] Python client: redis-py with hiredis
+- [ ] Verify connectivity and basic LPUSH/BRPOP
+
+### M3.2 — Producer/Consumer Workers
+- [ ] Host producer: enqueue to Redis List with rate limiting
+- [ ] Host consumer: BRPOP → batch collect → pack to fixed-size blobs
+- [ ] Stage in pinned buffer, async H2D, launch GPU kernel
+
+### M3.3 — GPU Kernel Processing
+- [ ] Simple processing kernel (e.g., checksum, transform)
+- [ ] Multi-stream pipelining: overlap H2D/kernel/D2H across streams
+- [ ] Measure achieved overlap with Nsight Systems
+
+### M3.4 — Reliability
+- [ ] Use RPOPLPUSH or Streams (XREADGROUP/XACK) for at-least-once
+- [ ] Retry logic with backoff; dead-letter after N failures
+
+Exit criteria: sustained throughput; at-least-once verified under worker restart.
+
+---
 
 ## Milestone M4 — Python API and Packaging
-- [ ] PyBind11 bindings for core API
-- [ ] Pythonic wrapper: context manager, type conversions, exceptions
-- [ ] `pyproject.toml` with scikit-build-core
-- [ ] Wheels (manylinux2014) for CPython 3.10–3.12
-- [ ] Optional extras: `track-a` for Redis client tooling
-- [ ] Example notebooks/scripts showing enqueue/process/dequeue
+**Goal**: Pythonic API with pip-installable wheel.
 
-Exit criteria: `pip install gpuqueue` usable locally; examples run on target GPU.
+### M4.1 — PyBind11 Bindings (Track B API)
+- [ ] Bind: `q_init()`, `q_enqueue()`, `q_enqueue_batch()`, `q_try_dequeue_result()`, `q_stats()`, `q_shutdown()`
+- [ ] Expose `QueueConfig`, `QueueStats`, `QueueStatus` as Python types
+- [ ] Exception wrapping for CUDA errors
 
+### M4.2 — Python Wrapper
+- [ ] Context manager: `with GPUQueue(capacity=4096, slot_bytes=2048) as q:`
+- [ ] NumPy/bytes integration for payloads
+- [ ] Async-friendly API with `asyncio` compatibility (future)
+
+### M4.3 — Packaging & Distribution
+- [x] `pyproject.toml` with scikit-build-core (scaffold exists)
+- [ ] Fix wheel.packages path for scikit-build
+- [ ] Local `pip install -e .` working
+- [ ] cibuildwheel config for manylinux2014_x86_64
+
+Exit criteria: `pip install gpuqueue` works; example script runs.
+
+---
 
 ## Milestone M5 — Testing, Benchmarking, and Soak
-- [ ] Unit tests (host+device), integration tests
-- [ ] Benchmark suites for throughput/latency (Track A vs Track B)
-- [ ] Soak tests with backpressure + restarts
-- [ ] Automated reports and charts
+**Goal**: Comprehensive test coverage and performance baselines.
 
-Exit criteria: performance baselines documented; regressions detectable.
+### M5.1 — Unit Tests
+- [ ] Host tests: index math, config validation, error codes (gtest)
+- [ ] Device tests: slot state machine, fence correctness, atomic ops
+- [ ] Python tests: pytest for API, error handling, edge cases
 
+### M5.2 — Integration Tests
+- [ ] End-to-end: enqueue N messages → process → dequeue all → verify
+- [ ] Stress test: max rate, full queue, backpressure
+- [ ] Fault injection: kernel assert, timeout, restart
+
+### M5.3 — Benchmarks
+- [ ] Throughput vs payload size (256B, 512B, 1KB, 2KB, 4KB)
+- [ ] Latency histogram (p50/p95/p99)
+- [ ] GPU utilization and overlap metrics (Nsight Systems)
+- [ ] Comparison: Track A vs Track B
+
+### M5.4 — Soak Tests
+- [ ] 30-60 min continuous run; verify no leaks, stable latency
+- [ ] Memory profiling with `cuda-memcheck`
+
+Exit criteria: test pass rate >95%; baselines documented; no memory leaks.
+
+---
 
 ## Milestone M6 — CI/CD and Release
-- [ ] GitHub Actions: lint, unit, integration (CPU-only)
-- [ ] GPU test workflow on self-hosted runner (integration + perf smoke)
-- [ ] cibuildwheel for wheels; auditwheel validation
-- [ ] Pre-release `0.1.0a` to TestPyPI
-- [ ] Promotion to PyPI with release notes and docs links
+**Goal**: Automated builds, tests, and releases.
 
-Exit criteria: repeatable builds, published artifacts, minimal manual steps.
+- [ ] GitHub Actions: lint (ruff), format (clang-format), type check (mypy)
+- [ ] CI: build + CPU-only unit tests on ubuntu-22.04
+- [ ] GPU runner: integration tests, sanitizer runs (self-hosted or cloud GPU)
+- [ ] cibuildwheel → upload to TestPyPI
+- [ ] Release workflow: tag → build → publish to PyPI
+- [ ] Documentation site (mkdocs or sphinx)
 
+Exit criteria: green CI on main; published 0.1.0 release.
 
-## Nice-to-Haves and Future Work
-- [ ] Multi-GPU support; NUMA-aware host staging
-- [ ] Variable-size messages; slab allocator
-- [ ] Exactly-once semantics; compaction and persistence
-- [ ] Plugin kernels registry; dynamic loading
-- [ ] CuPy/NumPy zero-copy adapters in Python API
+---
 
+## Future Work (Post-MVP)
+- [ ] Multi-GPU support; NUMA-aware pinned memory
+- [ ] Variable-size messages with slab allocator
+- [ ] Exactly-once semantics (idempotent processing + dedupe)
+- [ ] Plugin kernel registry; dynamic .cubin loading
+- [ ] CuPy/NumPy zero-copy via `__cuda_array_interface__`
+- [ ] GPUDirect RDMA for network → VRAM path
+
+---
 
 ## References
 - `docs/design.md`, `docs/api.md`, `docs/runbook.md`
-- NVIDIA CUDA Programming Guide and Samples
-- Redis Streams and client libraries
+- NVIDIA CUDA C++ Programming Guide (memory fences, atomics)
+- NVIDIA cuda-samples: asyncAPI, threadFenceReduction
+- Redis Streams and hiredis
+- scikit-build-core documentation

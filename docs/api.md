@@ -37,45 +37,95 @@ typedef enum QueueStatus {
   Q_ERR_FULL = -2,
   Q_ERR_TIMEOUT = -3,
   Q_ERR_CUDA = -4,
-  Q_ERR_SHUTDOWN = -5
+  Q_ERR_SHUTDOWN = -5,
+  Q_ERR_NOT_READY = -6,   // Message still processing (for try_dequeue_result)
+  Q_ERR_NOT_FOUND = -7    // Message ID not found
 } QueueStatus;
 ```
 
 ## 3) Host API (Track B)
+
+### 3.1 Lifecycle Management
 ```c
 // Initialize a GPU-resident queue and start the persistent kernel.
 // Returns NULL on failure; use q_last_error() for details.
 GpuQueue* q_init(const QueueConfig* cfg);
 
 // Gracefully stop the persistent kernel and free resources.
+// Waits for in-flight messages to complete before returning.
 void q_shutdown(GpuQueue* q);
 
-// Enqueue a message. Copies `len` bytes from host buffer `data` into a free slot.
-// On success, returns Q_OK and sets *out_msg_id (monotonic ID). May block up to timeout_ms.
+// Retrieve human-readable string for last error in the calling thread.
+const char* q_last_error(void);
+```
+
+### 3.2 Enqueue API
+```c
+// Enqueue a single message (blocking with timeout).
+// Copies `len` bytes from host buffer `data` into a free slot.
+// On success, returns Q_OK and sets *out_msg_id (monotonic ID).
+// May block up to timeout_ms waiting for a free slot.
 QueueStatus q_enqueue(GpuQueue* q,
                       const void* data,
                       size_t len,
                       uint64_t* out_msg_id,
                       uint32_t timeout_ms);
 
-// Try to read back a result for a specific message ID (if the kernel produces results).
+// Enqueue a single message (non-blocking, async).
+// Returns immediately after initiating H2D transfer.
+// Use q_wait_enqueue() or poll stats to confirm completion.
+QueueStatus q_enqueue_async(GpuQueue* q,
+                            const void* data,
+                            size_t len,
+                            uint64_t* out_msg_id);
+
+// Batch enqueue multiple messages (high-throughput path).
+// `items` is an array of {data, len} pairs; `count` is the number of items.
+// Returns number of successfully enqueued messages in *out_enqueued.
+// Remaining items can be retried if Q_ERR_FULL.
+typedef struct EnqueueItem {
+    const void* data;
+    size_t len;
+} EnqueueItem;
+
+QueueStatus q_enqueue_batch(GpuQueue* q,
+                            const EnqueueItem* items,
+                            size_t count,
+                            uint64_t* out_msg_ids,  // array of size `count`
+                            size_t* out_enqueued,
+                            uint32_t timeout_ms);
+```
+
+### 3.3 Dequeue / Result API
+```c
+// Try to read back a result for a specific message ID.
 // If available and `*inout_len` is sufficient, copies into out_buf and returns Q_OK.
+// Returns Q_ERR_NOT_READY if message is still being processed.
 QueueStatus q_try_dequeue_result(GpuQueue* q,
                                  uint64_t msg_id,
                                  void* out_buf,
                                  size_t* inout_len);
 
+// Poll for completed messages (completion queue pattern).
+// Fills `out_msg_ids` with up to `max_count` completed message IDs.
+// Returns actual count in *out_count. Non-blocking.
+QueueStatus q_poll_completions(GpuQueue* q,
+                               uint64_t* out_msg_ids,
+                               size_t max_count,
+                               size_t* out_count);
+```
+
+### 3.4 Monitoring
+```c
 // Snapshot counters and health.
 QueueStatus q_stats(GpuQueue* q, QueueStats* out);
-
-// Retrieve human-readable string for last error in the calling thread.
-const char* q_last_error(void);
 ```
 
 Notes:
 - `len` must be <= `cfg->slot_bytes`.
-- Enqueue may return `Q_ERR_FULL` if the ring buffer is full (no free slots within timeout).
-- For high-throughput, batch enqueues and use pinned host memory.
+- Enqueue may return `Q_ERR_FULL` if the ring buffer is full.
+- For high-throughput, use `q_enqueue_batch()` with pinned host memory.
+- `q_poll_completions()` is more efficient than polling individual msg_ids.
 
 ## 4) Kernel plug-in (MVP)
 MVP uses a compiled-in device function. Later versions can support a registration mechanism.
