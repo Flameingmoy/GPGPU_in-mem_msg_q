@@ -172,6 +172,20 @@ Exit criteria: `pip install -e .` works ✅; example script runs ✅; comparison
 ## Milestone M5 — Testing, Benchmarking, and Soak
 **Goal**: Comprehensive test coverage and performance baselines.
 
+### M5.0 — Hardware Monitoring
+- [x] `scripts/hardware_monitor.py`: Real-time CPU, RAM, GPU, VRAM monitoring
+  - psutil for CPU/RAM metrics
+  - pynvml/nvidia-smi for GPU metrics
+  - CSV export for analysis
+- [x] `scripts/benchmark_with_monitor.py`: Benchmarks with resource tracking
+  - Track A and Track B throughput/latency
+  - Hardware summary (avg/max utilization)
+- [x] Example output:
+  - CPU: ~19% avg, 24% max
+  - RAM: 7.4 GB (24%)
+  - GPU: 23% util, 1.2 GB VRAM
+  - Track B: 65k msg/s, Track A: 38k msg/s (1.7x speedup)
+
 ### M5.1 — Unit Tests
 - [ ] Host tests: index math, config validation, error codes (gtest)
 - [ ] Device tests: slot state machine, fence correctness, atomic ops

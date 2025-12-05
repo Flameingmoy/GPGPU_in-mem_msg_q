@@ -27,14 +27,17 @@ classifiers = [
 
 [project.optional-dependencies]
 track-a = [
-  "redis[hiredis]>=5,<6",
-  "msgpack>=1.0,<2",
-  "numpy>=1.24,<3",
+  "redis[hiredis]>=5.0",
+  "msgpack>=1.0",
+  "numpy>=1.24",
 ]
-
+monitor = [
+  "psutil>=5.9",
+  "nvidia-ml-py>=12.0",
+]
 dev = [
-  "pytest",
-  "pytest-benchmark",
+  "pytest>=7.0",
+  "pytest-benchmark>=4.0",
   "mypy",
   "ruff",
 ]
