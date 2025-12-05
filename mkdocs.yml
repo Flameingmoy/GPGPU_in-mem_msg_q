@@ -38,12 +38,20 @@ nav:
   - API Reference:
     - Python: api/python.md
     - C++: api/cpp.md
+    - API Overview: api.md
   - Development:
     - Building: dev/building.md
-    - Testing: dev/testing.md
+    - Testing: testing.md
+    - Benchmarking: benchmarking.md
     - Publishing: dev/publishing.md
     - Contributing: dev/contributing.md
+  - Operations:
+    - Runbook: runbook.md
+    - Tasks: tasks.md
   - Design: design.md
+  - Research: research.md
+  - Use Cases: use_cases.md
+  - Packaging: packaging.md
 
 markdown_extensions:
   - pymdownx.highlight:
