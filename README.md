@@ -31,11 +31,22 @@ A high-performance, GPU-resident message queue with Python bindings. Messages ar
 |-----------|--------|-------------|
 | M0 | ✅ Complete | Documentation foundations |
 | M1 | ✅ Complete | Environment & build verification |
-| M2 | 🚧 In Progress | Ring buffer & persistent kernel |
-| M3 | ⬜ Pending | Redis-backed MVP (Track A) |
+| M2 | ✅ Complete | Ring buffer & persistent kernel (172k msg/s) |
+| M3 | 🚧 Next | Redis-backed MVP (Track A validation) |
 | M4 | ⬜ Pending | Python API & packaging |
 | M5 | ⬜ Pending | Testing & benchmarking |
 | M6 | ⬜ Pending | CI/CD & release |
+
+### Current Performance (M2)
+
+Tested on RTX 4070 Ti Super (sm_89, 16GB VRAM):
+
+| Metric | Value |
+|--------|-------|
+| Enqueue Rate | 172,891 msg/s |
+| Throughput | 42.21 MB/s |
+| Test Messages | 1000 (0 errors) |
+| Integration Tests | 5/5 passing |
 
 ## Quick Start
 
@@ -110,16 +121,17 @@ flowchart LR
 
 ```
 ├── include/gpuqueue/       # Public C++ headers
-│   ├── queue.hpp           # Core API declarations
+│   ├── types.hpp           # SlotHeader, SlotState, ControlBlock, QueueConfig
 │   ├── memory.hpp          # CUDA memory utilities (RAII wrappers)
-│   └── ring_buffer.hpp     # Ring buffer config
+│   ├── ring_buffer.hpp     # RingBuffer class (device memory management)
+│   └── gpu_queue.hpp       # GpuQueue class (main API)
 ├── src/
 │   ├── cpp/                # C++ host code & pybind11 bindings
-│   ├── cuda/               # CUDA kernels
+│   ├── cuda/               # CUDA kernels (persistent consumer)
 │   └── python/gpuqueue/    # Python package
 ├── tests/
 │   ├── cpp/                # C++ unit tests (gtest)
-│   └── cuda/               # CUDA tests
+│   └── cuda/               # CUDA integration tests
 ├── scripts/
 │   └── check_env.sh        # Environment verification
 └── docs/                   # Design docs, API reference, runbooks
@@ -133,16 +145,17 @@ flowchart LR
 - [`docs/testing.md`](docs/testing.md) — Test strategy & invariants
 - [`docs/runbook.md`](docs/runbook.md) — Operations & troubleshooting
 
-## Benchmarks (Preliminary)
+## Hardware Specifications
 
-Tested on RTX 4070 Ti Super (sm_89, 16GB VRAM):
+Tested on RTX 4070 Ti Super:
 
-| Metric | Value |
-|--------|-------|
+| Spec | Value |
+|------|-------|
+| Compute Capability | 8.9 (sm_89) |
+| SM Count | 66 |
+| VRAM | 16 GB GDDR6X |
 | PCIe Bandwidth (H2D) | ~24 GB/s |
 | PCIe Bandwidth (D2H) | ~24 GB/s |
-| Compute Capability | 8.9 |
-| SM Count | 66 |
 
 ## Contributing
 

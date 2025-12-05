@@ -2,6 +2,11 @@
 
 Status: Active. Focus: correctness, reliability (at-least-once), and concurrency safety.
 
+**Testing Philosophy:**
+- **Track B (GPU-Resident)** is the primary deliverable — extensive unit, integration, and soak tests
+- **Track A (Redis-Backed)** is a validation harness — used to verify GPU patterns and provide comparison baselines
+- All tests should be automatable for CI/CD
+
 ---
 
 ## 1) Test Framework & Directory Structure
@@ -9,26 +14,28 @@ Status: Active. Focus: correctness, reliability (at-least-once), and concurrency
 ### Frameworks
 - **C++ Unit Tests**: Google Test (gtest) — header-only, CMake-friendly
 - **CUDA Device Tests**: gtest + custom CUDA test harness
-- **Python Tests**: pytest with pytest-benchmark
+- **Python Tests**: pytest with pytest-benchmark, pytest-asyncio
 - **Sanitizers**: NVIDIA Compute Sanitizer (memcheck, racecheck, synccheck)
+- **Mocking**: FakeRedis for Track A tests without Redis server
 
 ### Directory Structure
 ```
 tests/
 ├── cpp/                    # Host-side C++ unit tests
-│   ├── test_ring_math.cpp
+│   ├── test_ring_math.cpp          ✅ Implemented
 │   ├── test_config.cpp
 │   └── test_error_codes.cpp
 ├── cuda/                   # Device-side CUDA tests
-│   ├── test_device_query.cu
+│   ├── test_device_query.cu        ✅ Implemented
+│   ├── test_queue_integration.cu   ✅ Implemented (5 tests passing)
 │   ├── test_atomics.cu
 │   ├── test_fences.cu
 │   └── test_slot_state.cu
-├── integration/            # End-to-end tests
-│   ├── test_enqueue_dequeue.cpp
-│   ├── test_backpressure.cpp
-│   └── test_shutdown.cpp
-├── python/                 # Python API tests
+├── integration/            # End-to-end tests (Python)
+│   ├── test_track_b_api.py         # Track B Python API
+│   ├── test_track_a_pipeline.py    # Track A Redis pipeline
+│   └── test_comparison.py          # Track A vs B comparison
+├── python/                 # Python unit tests
 │   ├── test_api.py
 │   ├── test_exceptions.py
 │   └── test_benchmark.py
@@ -128,21 +135,22 @@ __global__ void test_fence_visibility(int* flag, int* data) {
 
 ---
 
-## 5) Integration Tests
+## 5) Integration Tests — Track B (GPU-Resident Queue)
 
-### test_enqueue_dequeue.cpp
-1. Init queue with capacity=1024, slot_bytes=512
-2. Enqueue N=500 messages with sequential payloads
-3. Wait for processing (poll stats until deq_count == N)
-4. Dequeue all results, verify:
-   - All message IDs present
-   - Payloads correctly processed
-   - FIFO order preserved
+> These tests validate the primary deliverable: the GPU-resident message queue.
+
+### test_queue_integration.cu ✅ IMPLEMENTED
+Already implemented with 5 passing tests:
+1. **Init/Shutdown**: Queue lifecycle management
+2. **Single Message Roundtrip**: Enqueue → process → dequeue
+3. **Multiple Messages**: 50 messages, verify all processed
+4. **Poll Completions**: Scan DONE slots, return msg_ids
+5. **Throughput**: 1000 messages, measure msg/s and MB/s
 
 ### test_backpressure.cpp
 1. Init queue with capacity=64 (small)
 2. Enqueue at rate >> consumer rate
-3. Verify `Q_ERR_FULL` returned (not hang)
+3. Verify `ERR_FULL` or `ERR_TIMEOUT` returned (not hang)
 4. Verify `dropped_full` counter incremented
 5. After consumer catches up, enqueue resumes
 
@@ -154,14 +162,173 @@ __global__ void test_fence_visibility(int* flag, int* data) {
    - All INFLIGHT complete to DONE
    - Resources freed (no leaks)
 
-### test_fault_injection.cpp
-1. Configure `process_message` to fail for msg_id % 10 == 7
-2. Verify retry up to N times
-3. Verify DLQ receives failed messages after N retries
+### test_concurrent_enqueue.cpp
+1. Launch N producer threads, each enqueuing M messages
+2. Verify all N*M messages processed exactly once
+3. Verify no duplicate msg_ids
+4. Verify stats consistency
 
 ---
 
-## 6) Sanitizer Verification
+## 6) Integration Tests — Track A (Redis Validation)
+
+> Track A tests validate the GPU processing patterns using Redis as a broker.
+> These tests also provide comparison baselines for Track B performance.
+
+### test_track_a_pipeline.py
+```python
+import pytest
+from gpuqueue.track_a import Producer, Consumer, GpuProcessor
+
+@pytest.fixture
+def redis_stream():
+    """Setup Redis stream, cleanup after test."""
+    import redis
+    r = redis.Redis()
+    stream_name = "test_stream"
+    r.delete(stream_name)
+    yield stream_name
+    r.delete(stream_name)
+
+def test_producer_consumer_roundtrip(redis_stream):
+    """Basic message flow through Redis → GPU → back."""
+    producer = Producer(redis_stream)
+    consumer = Consumer(redis_stream, group="test_group")
+    processor = GpuProcessor()
+    
+    # Produce messages
+    msg_ids = [producer.send(f"msg_{i}".encode()) for i in range(10)]
+    
+    # Consume and process
+    batch = consumer.fetch_batch(max_messages=10, timeout_ms=1000)
+    results = processor.process(batch)
+    consumer.ack(batch)
+    
+    assert len(results) == 10
+
+def test_at_least_once_delivery(redis_stream):
+    """Verify messages are redelivered on consumer failure."""
+    producer = Producer(redis_stream)
+    consumer1 = Consumer(redis_stream, group="test_group", consumer_id="c1")
+    consumer2 = Consumer(redis_stream, group="test_group", consumer_id="c2")
+    
+    producer.send(b"critical_message")
+    
+    # Consumer 1 fetches but doesn't ACK (simulating crash)
+    batch = consumer1.fetch_batch(max_messages=1, timeout_ms=1000)
+    assert len(batch) == 1
+    # No ack - consumer "crashes"
+    
+    # Consumer 2 claims pending message after timeout
+    pending = consumer2.claim_pending(min_idle_ms=100)
+    assert len(pending) == 1
+
+def test_batch_gpu_processing(redis_stream):
+    """Verify batch processing matches Track B patterns."""
+    producer = Producer(redis_stream)
+    processor = GpuProcessor(batch_size=64, slot_bytes=512)
+    
+    # Send batch
+    for i in range(64):
+        producer.send(f"payload_{i:04d}".encode())
+    
+    consumer = Consumer(redis_stream, group="test_group")
+    batch = consumer.fetch_batch(max_messages=64, timeout_ms=1000)
+    
+    # Process should use pinned memory + async H2D
+    results = processor.process(batch)
+    
+    assert len(results) == 64
+    # Verify GPU was actually used (check stats)
+    stats = processor.stats()
+    assert stats.gpu_batches_processed == 1
+```
+
+### test_comparison.py
+```python
+import pytest
+import time
+from gpuqueue import GpuQueue  # Track B
+from gpuqueue.track_a import Producer, Consumer, GpuProcessor  # Track A
+
+@pytest.fixture
+def track_b_queue():
+    q = GpuQueue(capacity=1024, slot_bytes=512)
+    yield q
+    q.shutdown()
+
+def test_throughput_comparison(track_b_queue, redis_stream):
+    """Compare throughput: Track A vs Track B."""
+    num_messages = 1000
+    payload = b"x" * 256
+    
+    # Track B throughput
+    start = time.perf_counter()
+    for i in range(num_messages):
+        track_b_queue.enqueue(payload)
+    # Wait for processing
+    while track_b_queue.stats().processed < num_messages:
+        time.sleep(0.001)
+    track_b_time = time.perf_counter() - start
+    track_b_rate = num_messages / track_b_time
+    
+    # Track A throughput
+    producer = Producer(redis_stream)
+    consumer = Consumer(redis_stream, group="test_group")
+    processor = GpuProcessor()
+    
+    start = time.perf_counter()
+    for i in range(num_messages):
+        producer.send(payload)
+    
+    processed = 0
+    while processed < num_messages:
+        batch = consumer.fetch_batch(max_messages=64, timeout_ms=100)
+        if batch:
+            processor.process(batch)
+            consumer.ack(batch)
+            processed += len(batch)
+    track_a_time = time.perf_counter() - start
+    track_a_rate = num_messages / track_a_time
+    
+    print(f"Track A: {track_a_rate:.0f} msg/s")
+    print(f"Track B: {track_b_rate:.0f} msg/s")
+    print(f"Track B speedup: {track_b_rate/track_a_rate:.1f}x")
+    
+    # Track B should be significantly faster (no Redis overhead)
+    assert track_b_rate > track_a_rate * 2, "Track B should be >2x faster"
+
+def test_latency_comparison(track_b_queue, redis_stream):
+    """Compare p50/p95/p99 latency: Track A vs Track B."""
+    # Implementation: measure individual message round-trip times
+    pass
+```
+
+### test_redis_streams.py (Unit tests for Redis integration)
+```python
+import pytest
+from unittest.mock import MagicMock
+
+def test_xadd_message_format():
+    """Verify message format matches Track B slot format."""
+    pass
+
+def test_consumer_group_creation():
+    """Verify consumer group is created correctly."""
+    pass
+
+def test_xclaim_pending_messages():
+    """Verify pending messages can be claimed after timeout."""
+    pass
+
+def test_dead_letter_queue():
+    """Verify failed messages move to DLQ after N retries."""
+    pass
+```
+
+---
+
+## 7) Sanitizer Verification
 
 All tests should pass with sanitizers enabled:
 
@@ -190,7 +357,7 @@ sanitizer-tests:
 
 ---
 
-## 7) Python Tests (pytest)
+## 8) Python Tests (pytest)
 
 ### test_api.py
 ```python
@@ -238,7 +405,7 @@ def test_enqueue_throughput(benchmark):
 
 ---
 
-## 8) Performance / Soak Tests
+## 9) Performance / Soak Tests
 
 ### Throughput Test
 - Measure messages/sec for payloads: 256B, 512B, 1KB, 2KB, 4KB
@@ -268,7 +435,7 @@ valgrind --leak-check=full --show-leak-kinds=all ./bin/soak_test
 
 ---
 
-## 9) CI/CD Test Matrix
+## 10) CI/CD Test Matrix
 
 | Test Level | Trigger | Runner | Timeout |
 |------------|---------|--------|---------|
@@ -289,7 +456,7 @@ ctest -L sanitizer     # With sanitizer wrappers
 
 ---
 
-## 10) Test Artifacts
+## 11) Test Artifacts
 
 ### Output Locations
 - Logs: `build/test_logs/` with timestamps
@@ -305,7 +472,7 @@ ctest -L sanitizer     # With sanitizer wrappers
 
 ---
 
-## 11) References
+## 12) References
 - `docs/design.md` §4 (fences), §6 (reliability)
 - NVIDIA Compute Sanitizer User Guide
 - NVIDIA CUDA C++ Programming Guide: Memory Fence Functions
