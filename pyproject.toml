@@ -14,7 +14,7 @@ description = "CUDA-backed GPU-resident message queue with Python bindings"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Chinmay" }]
-license = { text = "Apache-2.0" }
+license = { text = "GPL-3.0-or-later" }
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
@@ -22,13 +22,14 @@ classifiers = [
   "Programming Language :: Python",
   "Programming Language :: Python :: Implementation :: CPython",
   "Operating System :: POSIX :: Linux",
-  "License :: OSI Approved :: Apache Software License",
+  "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
 ]
 
 [project.optional-dependencies]
 track-a = [
   "redis[hiredis]>=5,<6",
   "msgpack>=1.0,<2",
+  "numpy>=1.24,<3",
 ]
 
 dev = [

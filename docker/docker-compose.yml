@@ -1,0 +1,35 @@
+# Docker Compose for Track A: Redis-backed MVP
+# Usage: docker compose up -d
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: gpuqueue-redis
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --appendonly no
+      --save ""
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # Redis Commander (optional web UI for debugging)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: gpuqueue-redis-ui
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles:
+      - debug  # Only starts with: docker compose --profile debug up
