@@ -2,8 +2,9 @@
 
 A high-performance, GPU-resident message queue with Python bindings. Messages are enqueued from the host, processed by a persistent CUDA kernel, and results returned — all with minimal PCIe round-trips.
 
+[![CI](https://github.com/Flameingmoy/GPGPU_in-mem_msg_q/actions/workflows/ci.yml/badge.svg)](https://github.com/Flameingmoy/GPGPU_in-mem_msg_q/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![CUDA](https://img.shields.io/badge/CUDA-12.6%2B-green.svg)](https://developer.nvidia.com/cuda-toolkit)
+[![CUDA](https://img.shields.io/badge/CUDA-12.4%2B-green.svg)](https://developer.nvidia.com/cuda-toolkit)
 [![Python](https://img.shields.io/badge/Python-3.10--3.12-blue.svg)](https://www.python.org/)
 
 ## Features
@@ -34,15 +35,16 @@ A high-performance, GPU-resident message queue with Python bindings. Messages ar
 | M2 | ✅ Complete | Ring buffer & persistent kernel |
 | M3 | ✅ Complete | Redis-backed MVP (Track A validation) |
 | M4 | ✅ Complete | Python API & packaging |
-| M5 | 🚧 Next | Testing & benchmarking |
-| M6 | ⬜ Pending | CI/CD & release |
+| M5 | ✅ Complete | Testing, benchmarking, soak tests |
+| M6 | ✅ Complete | CI/CD, release workflows, documentation |
 
 ### Performance Comparison
 
 | Metric | Track A (Redis) | Track B (GPU) | Speedup |
 |--------|-----------------|---------------|---------|
-| Throughput | 36k msg/s | 73k msg/s | **2.0x** |
-| Latency (p50) | 0.14 ms | 0.13 ms | 1.1x |
+| Throughput | 38k msg/s | 65k msg/s | **1.7x** |
+| Latency (p50) | 0.14 ms | 0.13 ms | ~same |
+| Soak Test | - | 397 msg/s steady | stable |
 
 ### Python API
 
@@ -142,11 +144,16 @@ flowchart LR
 │   ├── cpp/                # C++ unit tests (gtest)
 │   └── cuda/               # CUDA integration tests
 ├── scripts/
-│   └── check_env.sh        # Environment verification
+│   ├── check_env.sh        # Environment verification
+│   ├── hardware_monitor.py # CPU/GPU/RAM/VRAM monitoring
+│   ├── soak_test.py        # Long-running stability tests
+│   └── run_sanitizers.sh   # CUDA sanitizer verification
 └── docs/                   # Design docs, API reference, runbooks
 ```
 
 ## Documentation
+
+📖 **[Full Documentation](https://flameingmoy.github.io/GPGPU_in-mem_msg_q/)**
 
 - [`docs/design.md`](docs/design.md) — Architecture & concurrency model
 - [`docs/api.md`](docs/api.md) — Host & kernel API reference

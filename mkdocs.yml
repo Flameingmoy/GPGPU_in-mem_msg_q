@@ -1,0 +1,71 @@
+site_name: GPUQueue Documentation
+site_description: CUDA-backed GPU-resident message queue with Python bindings
+site_url: https://flameingmoy.github.io/GPGPU_in-mem_msg_q/
+repo_url: https://github.com/Flameingmoy/GPGPU_in-mem_msg_q
+repo_name: Flameingmoy/GPGPU_in-mem_msg_q
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - content.code.copy
+    - content.code.annotate
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+  - User Guide:
+    - Track A (Redis): guide/track-a.md
+    - Track B (GPU-Resident): guide/track-b.md
+    - Python API: guide/python-api.md
+  - API Reference:
+    - Python: api/python.md
+    - C++: api/cpp.md
+  - Development:
+    - Building: dev/building.md
+    - Testing: dev/testing.md
+    - Contributing: dev/contributing.md
+  - Design: design.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - tables
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src/python]
+          options:
+            docstring_style: google
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Flameingmoy/GPGPU_in-mem_msg_q
