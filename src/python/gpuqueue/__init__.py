@@ -3,7 +3,7 @@ GPUQueue: CUDA-backed GPU-resident message queue.
 
 Track B (GPU-Resident Queue):
     from gpuqueue import GpuQueue, QueueConfig
-    
+
     with GpuQueue(QueueConfig(capacity=1024, slot_bytes=512)) as q:
         msg_id = q.enqueue(b"hello world")
         # Wait for processing...
@@ -12,39 +12,43 @@ Track B (GPU-Resident Queue):
 Track A (Redis Validation):
     from gpuqueue.track_a import Producer, Consumer, GpuProcessor
 """
+
 from ._version import __version__
 
 # Core bindings
 try:
     from ._core import (
-        init, 
-        shutdown, 
-        version as core_version,
         # Track B classes
         GpuQueue,
         QueueConfig,
         QueueStats,
         QueueStatus,
+        init,
+        shutdown,
     )
+    from ._core import (
+        version as core_version,
+    )
+
     _BINDINGS_AVAILABLE = True
 except ImportError as e:
     _BINDINGS_AVAILABLE = False
     _import_error = e
-    
+
     # Stubs for when bindings aren't built
     core_version = None
     GpuQueue = None
     QueueConfig = None
     QueueStats = None
     QueueStatus = None
-    
+
     def init(*_, **__):
         raise RuntimeError(
             "gpuqueue extension not built. Build/install the package first:\n"
             "  pip install -e .\n"
             f"Original error: {_import_error}"
         )
-    
+
     def shutdown():
         return None
 
@@ -58,7 +62,7 @@ __all__ = [
     "__version__",
     # Legacy API
     "init",
-    "shutdown", 
+    "shutdown",
     "core_version",
     # Track B API
     "GpuQueue",

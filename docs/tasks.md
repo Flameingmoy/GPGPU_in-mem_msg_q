@@ -232,12 +232,32 @@ Exit criteria: test pass rate >95%; baselines documented; no memory leaks.
 ## Milestone M6 — CI/CD and Release
 **Goal**: Automated builds, tests, and releases.
 
-- [ ] GitHub Actions: lint (ruff), format (clang-format), type check (mypy)
-- [ ] CI: build + CPU-only unit tests on ubuntu-22.04
-- [ ] GPU runner: integration tests, sanitizer runs (self-hosted or cloud GPU)
-- [ ] cibuildwheel → upload to TestPyPI
-- [ ] Release workflow: tag → build → publish to PyPI
-- [ ] Documentation site (mkdocs or sphinx)
+### M6.1 — Lint & Format CI ✅
+- [x] `.github/workflows/ci.yml`: Main CI workflow
+- [x] ruff linter + formatter check
+- [x] mypy type checking (warn-only)
+- [x] clang-format C++ style check
+- [x] `.clang-format`: Google-based C++ style
+- [x] `pyproject.toml`: ruff, mypy, pytest config
+
+### M6.2 — Build & Test CI
+- [x] CUDA toolkit install via Jimver/cuda-toolkit action
+- [x] Build package with scikit-build-core
+- [x] Python 3.10/3.11/3.12 matrix
+- [ ] CPU-only pytest subset
+
+### M6.3 — GPU Runner
+- [ ] Self-hosted runner with NVIDIA GPU (optional)
+- [ ] Manual workflow dispatch for GPU tests
+
+### M6.4 — Wheels & PyPI
+- [ ] cibuildwheel configuration
+- [ ] TestPyPI upload
+- [ ] Release workflow: tag → build → PyPI
+
+### M6.5 — Documentation
+- [ ] mkdocs site
+- [ ] GitHub Pages deployment
 
 Exit criteria: green CI on main; published 0.1.0 release.
 

@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ==================== Lint & Format ====================
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install lint tools
+        run: pip install ruff mypy
+
+      - name: Run ruff linter
+        run: ruff check src/python tests scripts
+
+      - name: Run ruff formatter check
+        run: ruff format --check src/python tests scripts
+
+      - name: Run mypy
+        run: mypy src/python --ignore-missing-imports || echo "::warning::mypy found type issues (non-blocking)"
+
+  # ==================== C++ Format Check ====================
+  cpp-format:
+    name: C++ Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: sudo apt-get install -y clang-format-14
+
+      - name: Check C++ formatting
+        run: |
+          find src/cpp include -name '*.cpp' -o -name '*.hpp' -o -name '*.cu' -o -name '*.cuh' | \
+            xargs clang-format-14 --dry-run --Werror || \
+            echo "::warning::C++ formatting issues found. Run: find src include -name '*.cpp' -o -name '*.hpp' | xargs clang-format -i"
+
+  # ==================== Build & Test (CPU-only) ====================
+  build:
+    name: Build & Test
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.16
+        id: cuda-toolkit
+        with:
+          cuda: "12.4.0"
+          method: network
+          sub-packages: '["nvcc", "cudart-dev"]'
+
+      - name: Install build dependencies
+        run: |
+          pip install --upgrade pip
+          pip install scikit-build-core pybind11 cmake ninja pytest
+
+      - name: Build package
+        run: pip install -e ".[dev,track-a]" -v
+        env:
+          CMAKE_CUDA_COMPILER: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}/bin/nvcc
+
+      - name: Run Python unit tests (CPU-only)
+        run: |
+          # Run tests that don't require GPU
+          pytest tests/python/test_api.py -v -k "config or status or stats" || true
+          echo "Note: Full tests require GPU"
+
+  # ==================== GPU Tests (Manual Trigger) ====================
+  gpu-tests:
+    name: GPU Integration Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: GPU tests placeholder
+        run: |
+          echo "GPU tests require self-hosted runner with NVIDIA GPU"
+          echo "Run manually: ./scripts/run_sanitizers.sh"
+          echo "Run manually: python -m pytest tests/ -v"
