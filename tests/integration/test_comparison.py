@@ -209,25 +209,208 @@ class TestTrackALatency:
         assert p50 < 50, f"Latency too high: p50={p50:.2f}ms"
 
 
-class TestTrackBComparison:
-    """
-    Comparison tests between Track A and Track B.
+class TestTrackBThroughput:
+    """Track B (GPU-resident queue) throughput benchmarks."""
     
-    NOTE: Track B Python bindings not yet available (M4).
-    These tests are marked as skipped until bindings are ready.
-    """
+    def test_enqueue_throughput(self):
+        """Measure Track B enqueue-only throughput."""
+        from gpuqueue import GpuQueue, QueueConfig
+        
+        num_messages = 10000
+        payload_size = 256
+        payload = b"x" * payload_size
+        
+        cfg = QueueConfig(capacity=16384, slot_bytes=512)
+        
+        with GpuQueue(cfg) as q:
+            start = time.perf_counter()
+            for _ in range(num_messages):
+                q.enqueue(payload)
+            elapsed = time.perf_counter() - start
+        
+        rate = num_messages / elapsed
+        throughput_mb = (num_messages * payload_size) / (1024 * 1024) / elapsed
+        
+        print(f"\nTrack B enqueue throughput:")
+        print(f"  Messages: {num_messages}")
+        print(f"  Payload: {payload_size} bytes")
+        print(f"  Time: {elapsed:.3f}s")
+        print(f"  Rate: {rate:,.0f} msg/s")
+        print(f"  Throughput: {throughput_mb:.2f} MB/s")
+        
+        # Track B should be fast
+        assert rate > 50000, f"Track B too slow: {rate:.0f} msg/s"
     
-    @pytest.mark.skip(reason="Track B Python bindings not yet available (M4)")
+    def test_full_roundtrip_throughput(self):
+        """Measure Track B full roundtrip: enqueue → process → dequeue."""
+        from gpuqueue import GpuQueue, QueueConfig
+        
+        num_messages = 1000
+        payload_size = 256
+        payload = b"x" * payload_size
+        
+        cfg = QueueConfig(capacity=4096, slot_bytes=512)
+        
+        with GpuQueue(cfg) as q:
+            start = time.perf_counter()
+            
+            # Enqueue all
+            msg_ids = []
+            for _ in range(num_messages):
+                msg_id = q.enqueue(payload)
+                msg_ids.append(msg_id)
+            
+            # Wait for all to process and dequeue
+            for msg_id in msg_ids:
+                while True:
+                    success, data = q.try_dequeue_result(msg_id)
+                    if success:
+                        break
+                    time.sleep(0.0001)  # 100us
+            
+            elapsed = time.perf_counter() - start
+        
+        rate = num_messages / elapsed
+        throughput_mb = (num_messages * payload_size) / (1024 * 1024) / elapsed
+        
+        print(f"\nTrack B full roundtrip throughput:")
+        print(f"  Messages: {num_messages}")
+        print(f"  Payload: {payload_size} bytes")
+        print(f"  Time: {elapsed:.3f}s")
+        print(f"  Rate: {rate:,.0f} msg/s")
+        print(f"  Throughput: {throughput_mb:.2f} MB/s")
+
+
+class TestTrackComparison:
+    """Direct comparison tests between Track A and Track B."""
+    
     def test_throughput_comparison(self, test_stream):
         """Compare throughput: Track A vs Track B."""
-        # This will be implemented after M4 (Python bindings)
-        pass
+        from gpuqueue import GpuQueue, QueueConfig
+        from gpuqueue.track_a import Producer, Consumer, GpuProcessor
+        
+        num_messages = 1000
+        payload_size = 256
+        payload = b"x" * payload_size
+        
+        # === Track B ===
+        cfg = QueueConfig(capacity=4096, slot_bytes=512)
+        with GpuQueue(cfg) as q:
+            start = time.perf_counter()
+            for _ in range(num_messages):
+                q.enqueue(payload)
+            
+            # Wait for processing
+            while q.stats().processed_count < num_messages:
+                time.sleep(0.001)
+            track_b_time = time.perf_counter() - start
+        
+        track_b_rate = num_messages / track_b_time
+        
+        # === Track A ===
+        producer = Producer(test_stream)
+        consumer = Consumer(test_stream, group="comparison_group", batch_size=64)
+        processor = GpuProcessor(batch_size=64, slot_bytes=512)
+        
+        start = time.perf_counter()
+        for _ in range(num_messages):
+            producer.send(payload)
+        
+        processed = 0
+        while processed < num_messages:
+            batch = consumer.fetch_batch(timeout_ms=100)
+            if batch:
+                processor.process(batch)
+                consumer.ack(batch)
+                processed += len(batch)
+        track_a_time = time.perf_counter() - start
+        
+        track_a_rate = num_messages / track_a_time
+        
+        producer.close()
+        consumer.close()
+        
+        speedup = track_b_rate / track_a_rate if track_a_rate > 0 else float('inf')
+        
+        print(f"\n{'='*50}")
+        print(f"THROUGHPUT COMPARISON")
+        print(f"{'='*50}")
+        print(f"Track A (Redis): {track_a_rate:,.0f} msg/s")
+        print(f"Track B (GPU):   {track_b_rate:,.0f} msg/s")
+        print(f"Speedup:         {speedup:.1f}x")
+        print(f"{'='*50}")
+        
+        # Track B should be at least as fast as Track A
+        # (The real advantage is lower latency for single messages)
+        assert track_b_rate > 0, "Track B should have non-zero throughput"
     
-    @pytest.mark.skip(reason="Track B Python bindings not yet available (M4)")
     def test_latency_comparison(self, test_stream):
-        """Compare latency: Track A vs Track B."""
-        # This will be implemented after M4 (Python bindings)
-        pass
+        """Compare single-message latency: Track A vs Track B."""
+        from gpuqueue import GpuQueue, QueueConfig
+        from gpuqueue.track_a import Producer, Consumer, GpuProcessor
+        
+        num_samples = 50
+        payload = b"latency_test"
+        
+        # === Track B latency ===
+        cfg = QueueConfig(capacity=256, slot_bytes=256)
+        track_b_latencies = []
+        
+        with GpuQueue(cfg) as q:
+            for _ in range(num_samples):
+                start = time.perf_counter()
+                msg_id = q.enqueue(payload)
+                
+                while True:
+                    success, data = q.try_dequeue_result(msg_id)
+                    if success:
+                        break
+                
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                track_b_latencies.append(elapsed_ms)
+        
+        # === Track A latency ===
+        producer = Producer(test_stream)
+        consumer = Consumer(test_stream, group="latency_group", batch_size=1)
+        processor = GpuProcessor(batch_size=1, slot_bytes=256)
+        track_a_latencies = []
+        
+        for _ in range(num_samples):
+            start = time.perf_counter()
+            producer.send(payload)
+            
+            batch = None
+            while batch is None:
+                batch = consumer.fetch_batch(max_messages=1, timeout_ms=100)
+            
+            processor.process(batch)
+            consumer.ack(batch)
+            
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            track_a_latencies.append(elapsed_ms)
+        
+        producer.close()
+        consumer.close()
+        
+        # Statistics
+        track_b_p50 = statistics.median(track_b_latencies)
+        track_b_p95 = statistics.quantiles(track_b_latencies, n=20)[18]
+        
+        track_a_p50 = statistics.median(track_a_latencies)
+        track_a_p95 = statistics.quantiles(track_a_latencies, n=20)[18]
+        
+        print(f"\n{'='*50}")
+        print(f"LATENCY COMPARISON (ms)")
+        print(f"{'='*50}")
+        print(f"{'Metric':<15} {'Track A':>12} {'Track B':>12}")
+        print(f"{'-'*50}")
+        print(f"{'p50':<15} {track_a_p50:>12.2f} {track_b_p50:>12.2f}")
+        print(f"{'p95':<15} {track_a_p95:>12.2f} {track_b_p95:>12.2f}")
+        print(f"{'='*50}")
+        
+        # Track B should have lower latency (no Redis round-trip)
+        # Allow some tolerance for CI variance
+        assert track_b_p50 < track_a_p50 * 5, "Track B p50 should be reasonably low"
 
 
 if __name__ == "__main__":

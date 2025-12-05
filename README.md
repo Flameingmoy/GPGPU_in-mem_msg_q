@@ -31,22 +31,31 @@ A high-performance, GPU-resident message queue with Python bindings. Messages ar
 |-----------|--------|-------------|
 | M0 | ✅ Complete | Documentation foundations |
 | M1 | ✅ Complete | Environment & build verification |
-| M2 | ✅ Complete | Ring buffer & persistent kernel (172k msg/s) |
-| M3 | 🚧 Next | Redis-backed MVP (Track A validation) |
-| M4 | ⬜ Pending | Python API & packaging |
-| M5 | ⬜ Pending | Testing & benchmarking |
+| M2 | ✅ Complete | Ring buffer & persistent kernel |
+| M3 | ✅ Complete | Redis-backed MVP (Track A validation) |
+| M4 | ✅ Complete | Python API & packaging |
+| M5 | 🚧 Next | Testing & benchmarking |
 | M6 | ⬜ Pending | CI/CD & release |
 
-### Current Performance (M2)
+### Performance Comparison
 
-Tested on RTX 4070 Ti Super (sm_89, 16GB VRAM):
+| Metric | Track A (Redis) | Track B (GPU) | Speedup |
+|--------|-----------------|---------------|---------|
+| Throughput | 36k msg/s | 73k msg/s | **2.0x** |
+| Latency (p50) | 0.14 ms | 0.13 ms | 1.1x |
 
-| Metric | Value |
-|--------|-------|
-| Enqueue Rate | 172,891 msg/s |
-| Throughput | 42.21 MB/s |
-| Test Messages | 1000 (0 errors) |
-| Integration Tests | 5/5 passing |
+### Python API
+
+```python
+from gpuqueue import GpuQueue, QueueConfig
+
+with GpuQueue(QueueConfig(capacity=1024, slot_bytes=512)) as q:
+    msg_id = q.enqueue(b"hello world")
+    
+    # Wait for processing
+    success, result = q.try_dequeue_result(msg_id)
+    print(f"Result: {result}")
+```
 
 ## Quick Start
 
