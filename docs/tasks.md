@@ -229,7 +229,7 @@ Exit criteria: test pass rate >95%; baselines documented; no memory leaks.
 
 ---
 
-## Milestone M6 — CI/CD and Release
+## Milestone M6 — CI/CD and Release ✅
 **Goal**: Automated builds, tests, and releases.
 
 ### M6.1 — Lint & Format CI ✅
