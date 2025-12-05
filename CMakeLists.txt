@@ -106,6 +106,20 @@ if(GPUQUEUE_BUILD_TESTS)
   set_tests_properties(DeviceQuery PROPERTIES LABELS "cuda")
   
   # -------------------------------------------------------------------------
+  # Queue Integration Test
+  # -------------------------------------------------------------------------
+  add_executable(test_queue_integration
+    tests/cuda/test_queue_integration.cu
+  )
+  target_include_directories(test_queue_integration PRIVATE ${PROJECT_SOURCE_DIR}/include)
+  target_link_libraries(test_queue_integration PRIVATE gpuqueue_core CUDA::cudart)
+  set_target_properties(test_queue_integration PROPERTIES
+    CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES}
+  )
+  add_test(NAME QueueIntegration COMMAND test_queue_integration)
+  set_tests_properties(QueueIntegration PROPERTIES LABELS "cuda;integration")
+  
+  # -------------------------------------------------------------------------
   # C++ Unit Tests with Google Test
   # -------------------------------------------------------------------------
   add_executable(test_ring_math

@@ -2,7 +2,7 @@
 
 A high-performance, GPU-resident message queue with Python bindings. Messages are enqueued from the host, processed by a persistent CUDA kernel, and results returned — all with minimal PCIe round-trips.
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![CUDA](https://img.shields.io/badge/CUDA-12.6%2B-green.svg)](https://developer.nvidia.com/cuda-toolkit)
 [![Python](https://img.shields.io/badge/Python-3.10--3.12-blue.svg)](https://www.python.org/)
 
@@ -155,7 +155,7 @@ Tested on RTX 4070 Ti Super (sm_89, 16GB VRAM):
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE) for details.
+This project is licensed under the GNU General Public License v3.0 — see the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
