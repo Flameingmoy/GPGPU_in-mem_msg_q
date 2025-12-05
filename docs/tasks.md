@@ -189,7 +189,16 @@ Exit criteria: `pip install -e .` works ✅; example script runs ✅; comparison
 ### M5.1 — Unit Tests
 - [ ] Host tests: index math, config validation, error codes (gtest)
 - [ ] Device tests: slot state machine, fence correctness, atomic ops
-- [ ] Python tests: pytest for API, error handling, edge cases
+- [x] Python tests: `tests/python/test_api.py` (27 tests)
+  - QueueConfig validation
+  - GpuQueue lifecycle (init, shutdown, context manager)
+  - Enqueue/dequeue roundtrip
+  - Error handling (payload too large, shutdown)
+  - Buffer protocol (bytes, numpy, memoryview)
+- [x] Track A tests: `tests/python/test_track_a.py` (15 tests)
+  - Producer/Consumer creation and operations
+  - Batch processing
+  - End-to-end pipeline
 
 ### M5.2 — Integration Tests
 - [ ] End-to-end: enqueue N messages → process → dequeue all → verify
