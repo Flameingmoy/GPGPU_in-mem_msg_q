@@ -41,6 +41,7 @@ nav:
   - Development:
     - Building: dev/building.md
     - Testing: dev/testing.md
+    - Publishing: dev/publishing.md
     - Contributing: dev/contributing.md
   - Design: design.md
 

@@ -9,21 +9,46 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "gpuqueue"
-version = "0.1.0a0"
+version = "0.1.0a1"
 description = "CUDA-backed GPU-resident message queue with Python bindings"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Chinmay" }]
 license = { text = "GPL-3.0-or-later" }
+keywords = [
+  "cuda",
+  "gpu",
+  "message-queue",
+  "high-performance",
+  "nvidia",
+  "pybind11",
+  "async",
+  "ring-buffer",
+]
 classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering",
+  "Topic :: System :: Distributed Computing",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Programming Language :: C++",
-  "Programming Language :: Python",
   "Programming Language :: Python :: Implementation :: CPython",
   "Operating System :: POSIX :: Linux",
   "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+  "Environment :: GPU :: NVIDIA CUDA",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Flameingmoy/GPGPU_in-mem_msg_q"
+Documentation = "https://flameingmoy.github.io/GPGPU_in-mem_msg_q/"
+Repository = "https://github.com/Flameingmoy/GPGPU_in-mem_msg_q.git"
+Issues = "https://github.com/Flameingmoy/GPGPU_in-mem_msg_q/issues"
+Changelog = "https://github.com/Flameingmoy/GPGPU_in-mem_msg_q/releases"
 
 [project.optional-dependencies]
 track-a = [
